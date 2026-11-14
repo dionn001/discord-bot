@@ -9,7 +9,6 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.guilds = True
-intents.moderation = True
 
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
@@ -34,8 +33,6 @@ def admin_or_botadmin():
 async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
     print('------')
-
-# --- PASSIVE SECURITY & ANTI-RAID ---
 
 @bot.event
 async def on_member_join(member):
@@ -88,7 +85,6 @@ async def on_message(message):
     is_admin = message.author.guild_permissions.administrator or any(r.name == "BotAdmin" for r in message.author.roles)
 
     if not is_admin:
-        # Anti-Link
         if antilink_enabled and ("http://" in message.content.lower() or "https://" in message.content.lower() or "discord.gg/" in message.content.lower()):
             try:
                 await message.delete()
@@ -97,7 +93,6 @@ async def on_message(message):
             except:
                 pass
 
-        # Anti-Spam
         if antispam_enabled:
             now = time.time()
             spam_tracker[message.author.id].append(now)
@@ -112,8 +107,6 @@ async def on_message(message):
                     pass
 
     await bot.process_commands(message)
-
-# --- GENERAL & INFO COMMANDS ---
 
 @bot.command()
 async def help(ctx):
@@ -156,8 +149,6 @@ async def avatar(ctx, member: discord.Member = None):
     embed = discord.Embed(title=f"🖼️ {member.name}'s Avatar", color=discord.Color.purple())
     embed.set_image(url=member.display_avatar.url)
     await ctx.send(embed=embed)
-
-# --- ADMIN & SECURITY TOGGLES ---
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -206,4 +197,168 @@ async def antilink(ctx, mode: str):
 @bot.command()
 @admin_or_botadmin()
 async def antispam(ctx, mode: str):
-    global
+    global antispam_enabled
+    if mode.lower() == "on":
+        antispam_enabled = True
+        await ctx.send("🛡️ **ANTI-SPAM ENABLED.**")
+    elif mode.lower() == "off":
+        antispam_enabled = False
+        await ctx.send("⚠️ **ANTI-SPAM DISABLED.**")
+
+@bot.command()
+@admin_or_botadmin()
+async def kick(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+    await member.kick(reason=reason)
+    await ctx.send(f'👢 Kicked {member.mention}. Reason: {reason}')
+
+@bot.command()
+@admin_or_botadmin()
+async def ban(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+    await member.ban(reason=reason)
+    await ctx.send(f'🔨 Banned {member.mention}. Reason: {reason}')
+
+@bot.command()
+@admin_or_botadmin()
+async def softban(ctx, member: discord.Member, *, reason: str = "Softban message cleanup"):
+    await member.ban(reason=reason, delete_message_days=1)
+    await ctx.guild.unban(member)
+    await ctx.send(f'🧹 Softbanned {member.mention} (messages cleared).')
+
+@bot.command()
+@admin_or_botadmin()
+async def unban(ctx, user_id: int):
+    user = await bot.fetch_user(user_id)
+    await ctx.guild.unban(user)
+    await ctx.send(f'🕊️ Unbanned {user.name}.')
+
+@bot.command()
+@admin_or_botadmin()
+async def mute(ctx, member: discord.Member, minutes: int = 10, *, reason: str = "No reason provided"):
+    duration = datetime.timedelta(minutes=minutes)
+    await member.timeout(duration, reason=reason)
+    await ctx.send(f'🔇 Muted {member.mention} for {minutes} minutes. Reason: {reason}')
+
+@bot.command()
+@admin_or_botadmin()
+async def unmute(ctx, member: discord.Member):
+    await member.timeout(None)
+    await ctx.send(f'🔊 Unmuted {member.mention}.')
+
+@bot.command()
+@admin_or_botadmin()
+async def warn(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+    warns[member.id].append(reason)
+    count = len(warns[member.id])
+    await ctx.send(f'⚠️ Warned {member.mention} (Total warnings: {count}). Reason: {reason}')
+
+@bot.command()
+@admin_or_botadmin()
+async def warnings(ctx, member: discord.Member):
+    user_warns = warns[member.id]
+    if not user_warns:
+        await ctx.send(f'✅ {member.mention} has 0 warnings.')
+    else:
+        formatted = "\n".join([f"{i+1}. {w}" for i, w in enumerate(user_warns)])
+        await ctx.send(f'📋 **Warnings for {member.name}:**\n{formatted}')
+
+@bot.command()
+@admin_or_botadmin()
+async def clearwarns(ctx, member: discord.Member):
+    warns[member.id].clear()
+    await ctx.send(f'🧹 Cleared all warnings for {member.mention}.')
+
+@bot.command()
+@admin_or_botadmin()
+async def clear(ctx, amount: int = 5):
+    await ctx.channel.purge(limit=amount + 1)
+    await ctx.send(f'🧹 Cleared {amount} messages.', delete_after=3)
+
+@bot.command()
+@admin_or_botadmin()
+async def lock(ctx):
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False)
+    await ctx.send('🔒 Channel locked.')
+
+@bot.command()
+@admin_or_botadmin()
+async def unlock(ctx):
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=True)
+    await ctx.send('🔓 Channel unlocked.')
+
+@bot.command()
+@admin_or_botadmin()
+async def lockdown(ctx):
+    for channel in ctx.guild.text_channels:
+        try:
+            await channel.set_permissions(ctx.guild.default_role, send_messages=False)
+        except:
+            pass
+    await ctx.send('🚨 **SERVER LOCKDOWN ACTIVATED:** All text channels have been locked!')
+
+@bot.command()
+@admin_or_botadmin()
+async def unlockdown(ctx):
+    for channel in ctx.guild.text_channels:
+        try:
+            await channel.set_permissions(ctx.guild.default_role, send_messages=True)
+        except:
+            pass
+    await ctx.send('🟢 **SERVER LOCKDOWN LIFTED:** All text channels are unlocked.')
+
+@bot.command()
+@admin_or_botadmin()
+async def slowmode(ctx, seconds: int):
+    await ctx.channel.edit(slowmode_delay=seconds)
+    await ctx.send(f'⏱️ Slowmode set to {seconds} seconds.')
+
+@bot.command()
+@admin_or_botadmin()
+async def nuke(ctx):
+    new_channel = await ctx.channel.clone(reason="Channel nuked by admin")
+    await ctx.channel.delete()
+    await new_channel.send("💥 **Channel has been nuked!**")
+
+@bot.command()
+@admin_or_botadmin()
+async def nick(ctx, member: discord.Member, *, nickname: str = None):
+    await member.edit(nick=nickname)
+    await ctx.send(f'✏️ Updated nickname for {member.mention}.')
+
+@bot.command()
+@admin_or_botadmin()
+async def role(ctx, member: discord.Member, role: discord.Role):
+    if role in member.roles:
+        await member.remove_roles(role)
+        await ctx.send(f'➖ Removed role **{role.name}** from {member.mention}.')
+    else:
+        await member.add_roles(role)
+        await ctx.send(f'➕ Added role **{role.name}** to {member.mention}.')
+
+@bot.command()
+@admin_or_botadmin()
+async def say(ctx, *, message: str):
+    await ctx.message.delete()
+    await ctx.send(message)
+
+@bot.command()
+@admin_or_botadmin()
+async def announce(ctx, *, message: str):
+    await ctx.message.delete()
+    embed = discord.Embed(title="📢 Server Announcement", description=message, color=discord.Color.gold())
+    await ctx.send(embed=embed)
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CheckFailure):
+        await ctx.send("❌ You don't have permission to use this command!")
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("⚠️ Missing required arguments! Type `!help` to see command usage.")
+    elif isinstance(error, commands.MemberNotFound):
+        await ctx.send("❌ User not found.")
+
+TOKEN = os.getenv('TOKEN')
+
+if not TOKEN:
+    print("ERROR: No TOKEN found in the environment variables!")
+else:
+    bot.run(TOKEN)
