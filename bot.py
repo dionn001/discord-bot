@@ -15,10 +15,20 @@ bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 join_tracker = defaultdict(list)
 admin_acties = defaultdict(list)
 spam_tracker = defaultdict(list)
+mention_tracker = defaultdict(list)
+caps_tracker = defaultdict(list)
 warns = defaultdict(list)
+muted_users = set()
+
 raid_modus = False
-antilink_enabled = False
+antilink_enabled = True
 antispam_enabled = True
+antimention_enabled = True
+anticaps_enabled = True
+antislur_enabled = True
+
+# Lijst met slechte woorden / scheldwoorden om te filteren
+BAD_WORDS = ["badword1", "badword2", "scheldwoord1", "scheldwoord2", "kanker", "tyfus", "kkr"]
 
 def admin_or_botadmin():
     async def predicate(ctx):
@@ -85,46 +95,96 @@ async def on_message(message):
     is_admin = message.author.guild_permissions.administrator or any(r.name == "BotAdmin" for r in message.author.roles)
 
     if not is_admin:
-        if antilink_enabled and ("http://" in message.content.lower() or "https://" in message.content.lower() or "discord.gg/" in message.content.lower()):
+        now = time.time()
+        content_lower = message.content.lower()
+
+        # 1. Anti-Bad Words / Profanity Filter
+        if antislur_enabled:
+            if any(word in content_lower for word in BAD_WORDS):
+                try:
+                    await message.delete()
+                    await message.channel.send(f"🚫 {message.author.mention}, watch your language! That word is not allowed.", delete_after=4)
+                    return
+                except:
+                    pass
+
+        # 2. Anti-Link
+        if antilink_enabled and ("http://" in content_lower or "https://" in content_lower or "discord.gg/" in content_lower):
             try:
                 await message.delete()
-                await message.channel.send(f"🚫 {message.author.mention}, links are not allowed here!", delete_after=4)
+                await message.channel.send(f"🚫 {message.author.mention}, links and invites are strictly prohibited!", delete_after=4)
                 return
             except:
                 pass
 
+        # 3. Advanced Anti-Spam
         if antispam_enabled:
-            now = time.time()
             spam_tracker[message.author.id].append(now)
-            spam_tracker[message.author.id] = [t for t in spam_tracker[message.author.id] if now - t < 5]
-            if len(spam_tracker[message.author.id]) > 5:
+            spam_tracker[message.author.id] = [t for t in spam_tracker[message.author.id] if now - t < 4]
+            if len(spam_tracker[message.author.id]) > 4:
                 try:
-                    await message.author.timeout(datetime.timedelta(minutes=5), reason="Anti-Spam protection triggered")
-                    await message.channel.send(f"🔇 {message.author.mention} has been timed out for 5 minutes for spamming.")
+                    await message.delete()
+                    await message.author.timeout(datetime.timedelta(minutes=10), reason="Automated Anti-Spam: Message spamming")
+                    await message.channel.send(f"🔇 {message.author.mention} has been timed out for 10 minutes for spamming messages.", delete_after=5)
                     spam_tracker[message.author.id].clear()
                     return
                 except:
                     pass
 
+        # 4. Anti-Mass Mentions
+        if antimention_enabled and len(message.mentions) >= 4:
+            try:
+                await message.delete()
+                await message.author.timeout(datetime.timedelta(minutes=15), reason="Automated Anti-Spam: Mass mentions")
+                await message.channel.send(f"🔇 {message.author.mention} has been timed out for mass mentioning users.", delete_after=5)
+                return
+            except:
+                pass
+
+        # 5. Anti-Caps Lock
+        if anticaps_enabled and len(message.content) > 8:
+            letters = [c for c in message.content if c.isalpha()]
+            if letters:
+                caps_ratio = sum(1 for c in letters if c.isupper()) / len(letters)
+                if caps_ratio > 0.7:
+                    try:
+                        await message.delete()
+                        await message.channel.send(f"⚠️ {message.author.mention}, please turn off Caps Lock!", delete_after=4)
+                        return
+                    except:
+                        pass
+
     await bot.process_commands(message)
 
 @bot.command()
 async def help(ctx):
-    embed = discord.Embed(title="🛡️ Security & Moderation Commands", color=discord.Color.blue())
-    embed.add_field(name="General", value="`!ping`, `!serverinfo`, `!userinfo [@user]`, `!avatar [@user]`", inline=False)
-    embed.add_field(name="Admin Setup", value="`!addadmin @user`, `!removeadmin @user`, `!raidmode <on/off>`, `!antilink <on/off>`, `!antispam <on/off>`", inline=False)
-    embed.add_field(name="Moderation", value="`!kick`, `!ban`, `!unban <id>`, `!softban`, `!mute <mins>`, `!unmute`, `!warn`, `!warnings`, `!clearwarns`", inline=False)
-    embed.add_field(name="Channel & Server", value="`!clear <amount>`, `!lock`, `!unlock`, `!lockdown`, `!unlockdown`, `!slowmode <sec>`, `!nuke`, `!nick`, `!role`, `!say`, `!announce`", inline=False)
+    embed = discord.Embed(title="🛡️ Advanced Security & Moderation Suite", color=discord.Color.dark_blue())
+    embed.add_field(name="General & Info", value="`!ping`, `!serverinfo`, `!userinfo [@user]`, `!avatar [@user]`, `!botstats`", inline=False)
+    embed.add_field(name="Security Controls", value="`!addadmin @user`, `!removeadmin @user`, `!raidmode <on/off>`, `!antilink <on/off>`, `!antispam <on/off>`, `!antimention <on/off>`, `!anticaps <on/off>`, `!antibadwords <on/off>`", inline=False)
+    embed.add_field(name="Moderation & Punishments", value="`!kick`, `!ban`, `!softban`, `!unban <id>`, `!mute <mins>`, `!unmute`, `!warn`, `!warnings`, `!clearwarns`, `!tempmute <mins>`", inline=False)
+    embed.add_field(name="Server & Channel Ops", value="`!clear <amount>`, `!lock`, `!unlock`, `!lockdown`, `!unlockdown`, `!slowmode <sec>`, `!nuke`, `!nick`, `!role`, `!say`, `!announce`, `!poll`", inline=False)
     await ctx.send(embed=embed)
 
 @bot.command()
 async def ping(ctx):
-    await ctx.send(f'🏓 Pong! Latency: {round(bot.latency * 1000)}ms. Security systems operational.')
+    await ctx.send(f'🏓 Pong! Latency: {round(bot.latency * 1000)}ms. All protection shields active.')
+
+@bot.command()
+async def botstats(ctx):
+    embed = discord.Embed(title="📊 Bot Status & Protections", color=discord.Color.green())
+    embed.add_field(name="Servers Protected", value=len(bot.guilds), inline=True)
+    embed.add_field(name="Anti-Raid Mode", value="Enabled" if raid_modus else "Standby", inline=True)
+    embed.add_field(name="Anti-Link", value="Active" if antilink_enabled else "Off", inline=True)
+    embed.add_field(name="Anti-Spam", value="Active" if antispam_enabled else "Off", inline=True)
+    embed.add_field(name="Anti-Mention", value="Active" if antimention_enabled else "Off", inline=True)
+    embed.add_field(name="Anti-Caps", value="Active" if anticaps_enabled else "Off", inline=True)
+    embed.add_field(name="Bad Word Filter", value="Active" if antislur_enabled else "Off", inline=True)
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def serverinfo(ctx):
     guild = ctx.guild
-    embed = discord.Embed(title=f"📊 Server Info: {guild.name}", color=discord.Color.green())
+    embed = discord.Embed(title=f"📊 Server Info: {guild.name}", color=discord.Color.blue())
     embed.add_field(name="Owner", value=guild.owner.mention, inline=True)
     embed.add_field(name="Members", value=guild.member_count, inline=True)
     embed.add_field(name="Channels", value=len(guild.channels), inline=True)
@@ -189,7 +249,7 @@ async def antilink(ctx, mode: str):
     global antilink_enabled
     if mode.lower() == "on":
         antilink_enabled = True
-        await ctx.send("🔗 **ANTI-LINK ENABLED:** Links from non-admins will be deleted.")
+        await ctx.send("🔗 **ANTI-LINK ENABLED:** Unauthorized links and invites will be scrubbed.")
     elif mode.lower() == "off":
         antilink_enabled = False
         await ctx.send("🔓 **ANTI-LINK DISABLED.**")
@@ -200,10 +260,43 @@ async def antispam(ctx, mode: str):
     global antispam_enabled
     if mode.lower() == "on":
         antispam_enabled = True
-        await ctx.send("🛡️ **ANTI-SPAM ENABLED.**")
+        await ctx.send("🛡️ **ANTI-SPAM SHIELD ENABLED.**")
     elif mode.lower() == "off":
         antispam_enabled = False
-        await ctx.send("⚠️ **ANTI-SPAM DISABLED.**")
+        await ctx.send("⚠️ **ANTI-SPAM SHIELD DISABLED.**")
+
+@bot.command()
+@admin_or_botadmin()
+async def antimention(ctx, mode: str):
+    global antimention_enabled
+    if mode.lower() == "on":
+        antimention_enabled = True
+        await ctx.send("🛡️ **ANTI-MENTION SPAM ENABLED.**")
+    elif mode.lower() == "off":
+        antimention_enabled = False
+        await ctx.send("⚠️ **ANTI-MENTION SPAM DISABLED.**")
+
+@bot.command()
+@admin_or_botadmin()
+async def anticaps(ctx, mode: str):
+    global anticaps_enabled
+    if mode.lower() == "on":
+        anticaps_enabled = True
+        await ctx.send("🔠 **ANTI-CAPS PROTECTION ENABLED.**")
+    elif mode.lower() == "off":
+        anticaps_enabled = False
+        await ctx.send("lowercase mode unlocked.")
+
+@bot.command()
+@admin_or_botadmin()
+async def antibadwords(ctx, mode: str):
+    global antislur_enabled
+    if mode.lower() == "on":
+        antislur_enabled = True
+        await ctx.send("🤬 **BAD WORD FILTER ENABLED.**")
+    elif mode.lower() == "off":
+        antislur_enabled = False
+        await ctx.send("⚠️ **BAD WORD FILTER DISABLED.**")
 
 @bot.command()
 @admin_or_botadmin()
@@ -237,6 +330,13 @@ async def mute(ctx, member: discord.Member, minutes: int = 10, *, reason: str = 
     duration = datetime.timedelta(minutes=minutes)
     await member.timeout(duration, reason=reason)
     await ctx.send(f'🔇 Muted {member.mention} for {minutes} minutes. Reason: {reason}')
+
+@bot.command()
+@admin_or_botadmin()
+async def tempmute(ctx, member: discord.Member, minutes: int = 5, *, reason: str = "Quick mute"):
+    duration = datetime.timedelta(minutes=minutes)
+    await member.timeout(duration, reason=reason)
+    await ctx.send(f'🔇 Temporarily muted {member.mention} for {minutes} minutes.')
 
 @bot.command()
 @admin_or_botadmin()
@@ -346,6 +446,15 @@ async def announce(ctx, *, message: str):
     await ctx.message.delete()
     embed = discord.Embed(title="📢 Server Announcement", description=message, color=discord.Color.gold())
     await ctx.send(embed=embed)
+
+@bot.command()
+@admin_or_botadmin()
+async def poll(ctx, *, question: str):
+    await ctx.message.delete()
+    embed = discord.Embed(title="📊 Server Poll", description=question, color=discord.Color.blurple())
+    poll_msg = await ctx.send(embed=embed)
+    await poll_msg.add_reaction("👍")
+    await poll_msg.add_reaction("👎")
 
 @bot.event
 async def on_command_error(ctx, error):
